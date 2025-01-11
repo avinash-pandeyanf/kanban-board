@@ -11,11 +11,11 @@ const app = express();
 
 // Middleware for handling CORS and request parsing
 app.use(cors({
-  // Update this for production with your frontend URL
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.FRONTEND_URL 
-    : 'http://localhost:8080'
+  origin: '*', // Temporarily allow all origins
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -25,14 +25,11 @@ app.use("/api/tasks", taskRoutes);
 // MongoDB connection with retry logic
 const connectDB = async () => {
   try {
-    const mongoURI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/kanban';
+    const mongoURI = process.env.MONGODB_URI;
     console.log('Attempting to connect to MongoDB at:', mongoURI);
     
     await mongoose.connect(mongoURI, {
-      dbName: "kanban",
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 5000 // 5 second timeout
+      dbName: "kanban"
     });
     console.log("MongoDB connected successfully");
   } catch (err) {

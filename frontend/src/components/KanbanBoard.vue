@@ -167,7 +167,7 @@ export default {
       const sectionName = prompt("Enter section name:");
       if (sectionName && !this.sections.includes(sectionName)) {
         this.sections.push(sectionName);
-        this.$set(this.tasks, sectionName, []);
+        this.tasks[sectionName] = [];
       }
     }
   }
