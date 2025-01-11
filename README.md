@@ -92,5 +92,3 @@ npm run serve
 3. Set environment variables
 4. Deploy
 
-## Contributing
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
