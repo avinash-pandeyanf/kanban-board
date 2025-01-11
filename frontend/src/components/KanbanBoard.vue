@@ -14,23 +14,33 @@
       <div class="filter-container">
         <select v-model="statusFilter" @change="filterTasks" class="status-filter">
           <option value="">All Statuses</option>
-          <option v-for="section in sections" :key="section" :value="section">
-            {{ section }}
+          <option v-for="section in sections" :key="section._id" :value="section.name">
+            {{ section.name }}
           </option>
         </select>
       </div>
     </div>
 
     <div class="kanban-board">
-      <div v-for="section in sections" :key="section" class="kanban-section">
+      <div v-for="section in sections" :key="section._id" class="kanban-section">
         <div class="section-header">
-          <h2>{{ section }}</h2>
-          <button class="add-task-btn" @click="openAddTaskModal(section)">
+          <div class="section-title">
+            <h2 @click="startEditingSection(section)">{{ section.name }}</h2>
+            <div class="section-actions">
+              <button class="edit-section-btn" @click="startEditingSection(section)">
+                <i class="fas fa-edit"></i>
+              </button>
+              <button class="delete-section-btn" @click="confirmDeleteSection(section)">
+                <i class="fas fa-trash"></i>
+              </button>
+            </div>
+          </div>
+          <button class="add-task-btn" @click="openAddTaskModal(section.name)">
             <i class="fas fa-plus"></i>
           </button>
         </div>
         <draggable 
-          v-model="tasks[section]" 
+          v-model="tasks[section.name]" 
           :group="{ name: 'tasks' }"
           item-key="_id"
           @end="updateTaskStatus"
@@ -44,8 +54,8 @@
             />
           </template>
         </draggable>
-        <div v-if="!tasks[section] || tasks[section].length === 0" class="empty-section">
-          <button class="add-task-btn-large" @click="openAddTaskModal(section)">
+        <div v-if="!tasks[section.name] || tasks[section.name].length === 0" class="empty-section">
+          <button class="add-task-btn-large" @click="openAddTaskModal(section.name)">
             + Add Task
           </button>
         </div>
@@ -96,6 +106,25 @@
       </div>
     </div>
 
+    <!-- Section Edit Modal -->
+    <div v-if="editingSection" class="modal">
+      <div class="modal-content">
+        <h3>Edit Section</h3>
+        <form @submit.prevent="saveSection">
+          <input 
+            v-model="sectionForm.name" 
+            placeholder="Section Name" 
+            required
+            ref="sectionNameInput"
+          >
+          <div class="modal-buttons">
+            <button type="button" @click="cancelEditSection">Cancel</button>
+            <button type="submit">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Confirmation Modal -->
     <div v-if="showConfirmModal" class="modal confirmation-modal">
       <div class="modal-content">
@@ -130,15 +159,15 @@ export default {
   },
   data() {
     return {
-      sections: ["Todo", "In Progress", "Done"],
-      tasks: { 
-        "Todo": [], 
-        "In Progress": [], 
-        "Done": [] 
-      },
+      sections: [],
+      tasks: {},
       showTaskModal: false,
       showConfirmModal: false,
       editingTask: null,
+      editingSection: null,
+      sectionForm: {
+        name: ""
+      },
       confirmAction: '',
       confirmMessage: '',
       taskToConfirm: null,
@@ -164,7 +193,7 @@ export default {
         // Update tasks object when sections change
         const newTasks = {};
         newSections.forEach(section => {
-          newTasks[section] = this.tasks[section] || [];
+          newTasks[section.name] = this.tasks[section.name] || [];
         });
         this.tasks = newTasks;
       },
@@ -173,20 +202,12 @@ export default {
   },
   async created() {
     try {
-      // Fetch sections first
-      const { data: sections } = await axios.get(`${process.env.VUE_APP_API_URL}/api/sections`);
-      if (Array.isArray(sections) && sections.length > 0) {
-        // Ensure default sections are first
-        const defaultSections = ["Todo", "In Progress", "Done"];
-        const customSections = sections.filter(section => !defaultSections.includes(section));
-        this.sections = [...defaultSections, ...customSections];
-      }
+      await this.fetchSections();
+      await this.fetchTasks();
     } catch (error) {
-      console.error("Error fetching sections:", error);
+      console.error("Error initializing board:", error);
+      this.showError("Failed to load the board. Please refresh the page.");
     }
-
-    // Then fetch tasks
-    await this.fetchTasks();
   },
   methods: {
     debounceSearch() {
@@ -196,6 +217,21 @@ export default {
       this.searchTimeout = setTimeout(() => {
         this.fetchTasks();
       }, 300);
+    },
+    async fetchSections() {
+      try {
+        const { data } = await axios.get(`${process.env.VUE_APP_API_URL}/api/sections`);
+        this.sections = data;
+        // Initialize tasks object
+        this.sections.forEach(section => {
+          if (!this.tasks[section.name]) {
+            this.$set(this.tasks, section.name, []);
+          }
+        });
+      } catch (error) {
+        console.error("Error fetching sections:", error);
+        throw error;
+      }
     },
     async fetchTasks() {
       try {
@@ -213,7 +249,7 @@ export default {
         
         // Reset all sections
         this.sections.forEach(section => {
-          this.tasks[section] = [];
+          this.tasks[section.name] = [];
         });
 
         // Distribute tasks to sections
@@ -322,32 +358,74 @@ export default {
       }
     },
     async addSection() {
-      const sectionName = prompt("Enter section name:");
-      if (sectionName && !this.sections.includes(sectionName)) {
-        // Add new section after the default sections
-        const defaultSections = ["Todo", "In Progress", "Done"];
-        const insertIndex = defaultSections.length;
-        this.sections.splice(insertIndex, 0, sectionName);
-        this.$set(this.tasks, sectionName, []);
-        
+      const name = prompt("Enter section name:");
+      if (name?.trim()) {
         try {
-          await this.saveSectionsToBackend();
-          this.showError(`Section "${sectionName}" added successfully!`, 'success');
+          this.loading = true;
+          const { data } = await axios.post(`${process.env.VUE_APP_API_URL}/api/sections`, { name: name.trim() });
+          this.sections = data;
+          this.$set(this.tasks, name.trim(), []);
+          this.showError(`Section "${name}" added successfully!`, 'success');
         } catch (error) {
-          this.sections = this.sections.filter(s => s !== sectionName);
-          delete this.tasks[sectionName];
-          this.showError("Failed to add section. Please try again.");
+          console.error("Error adding section:", error);
+          this.showError(error.response?.data?.message || "Failed to add section");
+        } finally {
+          this.loading = false;
         }
       }
     },
-    async saveSectionsToBackend() {
+    startEditingSection(section) {
+      this.editingSection = section;
+      this.sectionForm.name = section.name;
+      this.$nextTick(() => {
+        this.$refs.sectionNameInput?.focus();
+      });
+    },
+    async saveSection() {
       try {
-        await axios.post(`${process.env.VUE_APP_API_URL}/api/sections`, {
-          sections: this.sections
-        });
+        this.loading = true;
+        const { data } = await axios.put(
+          `${process.env.VUE_APP_API_URL}/api/sections/${this.editingSection._id}`,
+          { name: this.sectionForm.name.trim() }
+        );
+        this.sections = data;
+        
+        // Update tasks object with new section name
+        const oldName = this.editingSection.name;
+        const newName = this.sectionForm.name.trim();
+        this.$set(this.tasks, newName, this.tasks[oldName] || []);
+        if (oldName !== newName) {
+          this.$delete(this.tasks, oldName);
+        }
+        
+        this.cancelEditSection();
+        this.showError(`Section renamed to "${newName}"`, 'success');
       } catch (error) {
-        console.error("Error saving sections:", error);
-        throw error; // Propagate error to handle it in the calling function
+        console.error("Error saving section:", error);
+        this.showError(error.response?.data?.message || "Failed to save section");
+      } finally {
+        this.loading = false;
+      }
+    },
+    cancelEditSection() {
+      this.editingSection = null;
+      this.sectionForm.name = "";
+    },
+    async confirmDeleteSection(section) {
+      if (confirm(`Are you sure you want to delete "${section.name}" section? Tasks will be moved to Todo.`)) {
+        try {
+          this.loading = true;
+          const { data } = await axios.delete(`${process.env.VUE_APP_API_URL}/api/sections/${section._id}`);
+          this.sections = data;
+          this.$delete(this.tasks, section.name);
+          await this.fetchTasks(); // Refresh tasks as they might have moved
+          this.showError(`Section "${section.name}" deleted`, 'success');
+        } catch (error) {
+          console.error("Error deleting section:", error);
+          this.showError(error.response?.data?.message || "Failed to delete section");
+        } finally {
+          this.loading = false;
+        }
       }
     },
     addAssignee() {
@@ -424,54 +502,67 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  padding: 8px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #eee;
+  border-radius: 6px 6px 0 0;
 }
 
-.section-header h2 {
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-title h2 {
+  margin: 0;
   font-size: 16px;
   font-weight: 600;
-  color: #333;
-  margin: 0;
+  cursor: pointer;
 }
 
-.add-task-btn {
+.section-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.edit-section-btn,
+.delete-section-btn {
   background: none;
   border: none;
-  color: #666;
+  padding: 4px;
   cursor: pointer;
-  padding: 5px;
-  border-radius: 4px;
+  color: #666;
+  transition: color 0.2s;
 }
 
-.add-task-btn:hover {
-  background-color: #f5f5f5;
+.edit-section-btn:hover {
+  color: #4a9eff;
 }
 
-.task-list {
-  flex-grow: 1;
-  min-height: 100px;
-  padding: 8px 0;
+.delete-section-btn:hover {
+  color: #ff4444;
 }
 
 .empty-section {
-  display: flex;
-  justify-content: center;
-  padding: 20px 0;
+  padding: 16px;
+  text-align: center;
 }
 
 .add-task-btn-large {
+  width: 100%;
+  padding: 8px;
   background: none;
   border: 2px dashed #ddd;
-  color: #666;
-  padding: 10px 20px;
   border-radius: 6px;
+  color: #666;
   cursor: pointer;
-  width: 100%;
+  transition: all 0.2s;
 }
 
 .add-task-btn-large:hover {
-  background-color: #f9f9f9;
-  border-color: #ccc;
+  border-color: #4a9eff;
+  color: #4a9eff;
 }
 
 .add-section {
