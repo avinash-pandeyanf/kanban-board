@@ -18,9 +18,13 @@
         <i class="far fa-calendar"></i>
         {{ formatDate(task.dueDate) }}
       </div>
-      <div class="task-assignee">
-        <div class="avatar">
-          {{ getInitials(task.assignee) }}
+      <div class="task-assignees">
+        <div v-for="(assignee, index) in task.assignees" 
+             :key="index" 
+             class="avatar"
+             :title="assignee"
+             :style="{ backgroundColor: getAvatarColor(assignee) }">
+          {{ getInitials(assignee) }}
         </div>
       </div>
     </div>
@@ -49,6 +53,16 @@ export default {
       if (!name) return '';
       return name.split(' ').map(n => n[0]).join('').toUpperCase();
     },
+    getAvatarColor(name) {
+      const colors = [
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+        '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
+      ];
+      const hash = name.split('').reduce((acc, char) => {
+        return char.charCodeAt(0) + ((acc << 5) - acc);
+      }, 0);
+      return colors[Math.abs(hash) % colors.length];
+    },
     deleteTask() {
       this.showMenu = false;
       this.$emit('delete-task', this.task._id);
@@ -67,8 +81,15 @@ export default {
   border-radius: 6px;
   padding: 12px;
   margin-bottom: 8px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   cursor: grab;
+  transition: all 0.2s ease;
+  border: 1px solid #eee;
+}
+
+.task-card:hover {
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+  transform: translateY(-1px);
 }
 
 .task-header {
@@ -121,15 +142,17 @@ export default {
 }
 
 .task-description {
-  font-size: 12px;
   color: #666;
-  margin: 0 0 12px 0;
+  font-size: 13px;
+  margin: 8px 0;
+  line-height: 1.4;
 }
 
 .task-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-top: 12px;
   font-size: 12px;
   color: #666;
 }
@@ -140,16 +163,26 @@ export default {
   gap: 4px;
 }
 
+.task-assignees {
+  display: flex;
+  gap: 4px;
+}
+
 .avatar {
   width: 24px;
   height: 24px;
-  background: #e0e0e0;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 10px;
   font-weight: 500;
-  color: #666;
+  color: white;
+  cursor: default;
+  transition: transform 0.2s;
+}
+
+.avatar:hover {
+  transform: scale(1.1);
 }
 </style>

@@ -1,5 +1,26 @@
 <template>
   <div class="kanban-container">
+    <div class="board-header">
+      <div class="search-container">
+        <input 
+          type="text" 
+          v-model="searchQuery" 
+          @input="debounceSearch"
+          placeholder="Search tasks..."
+          class="search-input"
+        >
+        <i class="fas fa-search search-icon"></i>
+      </div>
+      <div class="filter-container">
+        <select v-model="statusFilter" @change="filterTasks" class="status-filter">
+          <option value="">All Statuses</option>
+          <option v-for="section in sections" :key="section" :value="section">
+            {{ section }}
+          </option>
+        </select>
+      </div>
+    </div>
+
     <div class="kanban-board">
       <div v-for="section in sections" :key="section" class="kanban-section">
         <div class="section-header">
@@ -18,8 +39,8 @@
           <template #item="{ element }">
             <TaskCard
               :task="element"
-              @delete-task="deleteTask"
-              @edit-task="openEditTaskModal"
+              @delete-task="showDeleteConfirmation"
+              @edit-task="showEditConfirmation"
             />
           </template>
         </draggable>
@@ -34,6 +55,17 @@
       </div>
     </div>
 
+    <!-- Loading Overlay -->
+    <div v-if="loading" class="loading-overlay">
+      <div class="spinner"></div>
+    </div>
+
+    <!-- Error Toast -->
+    <div v-if="errorMessage" class="error-toast" @click="errorMessage = ''">
+      {{ errorMessage }}
+      <button class="close-error">&times;</button>
+    </div>
+
     <!-- Task Modal -->
     <div v-if="showTaskModal" class="modal">
       <div class="modal-content">
@@ -42,12 +74,43 @@
           <input v-model="taskForm.name" placeholder="Task Name" required>
           <textarea v-model="taskForm.description" placeholder="Description" required></textarea>
           <input type="date" v-model="taskForm.dueDate" required>
-          <input v-model="taskForm.assignee" placeholder="Assignee" required>
+          <div class="assignees-input">
+            <div class="assignee-tags">
+              <span v-for="(assignee, index) in taskForm.assignees || []" :key="index" class="assignee-tag">
+                {{ assignee }}
+                <button type="button" @click="removeAssignee(index)" class="remove-assignee">&times;</button>
+              </span>
+            </div>
+            <input 
+              v-model="newAssignee" 
+              @keyup.enter="addAssignee"
+              placeholder="Add assignee and press Enter"
+              type="text"
+            >
+          </div>
           <div class="modal-buttons">
             <button type="button" @click="closeTaskModal">Cancel</button>
             <button type="submit">{{ editingTask ? 'Update' : 'Add' }}</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div v-if="showConfirmModal" class="modal confirmation-modal">
+      <div class="modal-content">
+        <h3>{{ confirmAction === 'delete' ? 'Delete Task' : 'Edit Task' }}</h3>
+        <p>{{ confirmMessage }}</p>
+        <div class="modal-buttons">
+          <button type="button" @click="cancelConfirmation">Cancel</button>
+          <button 
+            type="button" 
+            :class="{ 'delete-btn': confirmAction === 'delete' }"
+            @click="confirmAction === 'delete' ? confirmDelete() : confirmEdit()"
+          >
+            {{ confirmAction === 'delete' ? 'Delete' : 'Edit' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -57,6 +120,7 @@
 import TaskCard from "./TaskCard.vue";
 import { getTasks, addTask, updateTask, deleteTask } from "../services/taskService";
 import draggable from 'vuedraggable';
+import axios from 'axios';
 
 export default {
   name: 'KanbanBoard',
@@ -73,54 +137,145 @@ export default {
         "Done": [] 
       },
       showTaskModal: false,
+      showConfirmModal: false,
       editingTask: null,
+      confirmAction: '',
+      confirmMessage: '',
+      taskToConfirm: null,
+      newAssignee: '',
+      searchQuery: '',
+      statusFilter: '',
+      loading: false,
+      errorMessage: '',
+      searchTimeout: null,
       taskForm: {
         name: "",
         description: "",
         dueDate: "",
-        assignee: "",
+        assignees: [],
         status: ""
       }
     };
   },
+  watch: {
+    sections: {
+      handler(newSections) {
+        localStorage.setItem('kanbanSections', JSON.stringify(newSections));
+        // Update tasks object when sections change
+        const newTasks = {};
+        newSections.forEach(section => {
+          newTasks[section] = this.tasks[section] || [];
+        });
+        this.tasks = newTasks;
+      },
+      deep: true
+    }
+  },
   async created() {
+    try {
+      // Fetch sections first
+      const { data: sections } = await axios.get(`${process.env.VUE_APP_API_URL}/api/sections`);
+      if (Array.isArray(sections) && sections.length > 0) {
+        // Ensure default sections are first
+        const defaultSections = ["Todo", "In Progress", "Done"];
+        const customSections = sections.filter(section => !defaultSections.includes(section));
+        this.sections = [...defaultSections, ...customSections];
+      }
+    } catch (error) {
+      console.error("Error fetching sections:", error);
+    }
+
+    // Then fetch tasks
     await this.fetchTasks();
   },
   methods: {
+    debounceSearch() {
+      if (this.searchTimeout) {
+        clearTimeout(this.searchTimeout);
+      }
+      this.searchTimeout = setTimeout(() => {
+        this.fetchTasks();
+      }, 300);
+    },
     async fetchTasks() {
       try {
-        const { data } = await getTasks();
-        console.log('Fetched tasks:', data);
+        this.loading = true;
+        let url = new URL(`${process.env.VUE_APP_API_URL}/api/tasks`);
+        
+        if (this.searchQuery) {
+          url.searchParams.append('search', this.searchQuery);
+        }
+        if (this.statusFilter) {
+          url.searchParams.append('status', this.statusFilter);
+        }
+
+        const { data } = await getTasks(url.search);
+        
+        // Reset all sections
         this.sections.forEach(section => {
-          this.tasks[section] = data.filter(task => task.status === section);
+          this.tasks[section] = [];
+        });
+
+        // Distribute tasks to sections
+        data.forEach(task => {
+          if (this.tasks[task.status]) {
+            this.tasks[task.status].push(task);
+          }
         });
       } catch (error) {
         console.error("Error fetching tasks:", error);
+        this.showError("Failed to fetch tasks. Please try again.");
+      } finally {
+        this.loading = false;
       }
+    },
+    showError(message, type = 'error') {
+      this.errorMessage = message;
+      const toast = document.querySelector('.error-toast');
+      if (toast) {
+        toast.style.backgroundColor = type === 'success' ? '#4CAF50' : '#ff4444';
+      }
+      setTimeout(() => {
+        this.errorMessage = '';
+      }, 5000);
+    },
+    filterTasks() {
+      this.fetchTasks();
     },
     openAddTaskModal(status) {
       this.taskForm = {
         name: "",
         description: "",
         dueDate: "",
-        assignee: "",
+        assignees: [],
         status
       };
       this.editingTask = null;
       this.showTaskModal = true;
     },
     openEditTaskModal(task) {
-      this.taskForm = { ...task };
+      this.taskForm = { 
+        ...task,
+        assignees: Array.isArray(task.assignees) ? [...task.assignees] : []
+      };
       this.editingTask = task;
       this.showTaskModal = true;
     },
     closeTaskModal() {
       this.showTaskModal = false;
       this.editingTask = null;
-      this.taskForm = { name: "", description: "", dueDate: "", assignee: "", status: "" };
+      this.taskForm = {
+        name: "",
+        description: "",
+        dueDate: "",
+        assignees: [],
+        status: ""
+      };
+      this.newAssignee = '';
     },
     async saveTask() {
       try {
+        this.loading = true;
         if (this.editingTask) {
           const { data } = await updateTask(this.editingTask._id, this.taskForm);
           const status = this.editingTask.status;
@@ -134,6 +289,9 @@ export default {
         this.closeTaskModal();
       } catch (error) {
         console.error("Error saving task:", error);
+        this.showError(error.response?.data?.message || "Failed to save task. Please try again.");
+      } finally {
+        this.loading = false;
       }
     },
     async updateTaskStatus({ item, to, from }) {
@@ -163,13 +321,76 @@ export default {
         console.error("Error deleting task:", error);
       }
     },
-    addSection() {
+    async addSection() {
       const sectionName = prompt("Enter section name:");
       if (sectionName && !this.sections.includes(sectionName)) {
-        this.sections.push(sectionName);
-        this.tasks[sectionName] = [];
+        // Add new section after the default sections
+        const defaultSections = ["Todo", "In Progress", "Done"];
+        const insertIndex = defaultSections.length;
+        this.sections.splice(insertIndex, 0, sectionName);
+        this.$set(this.tasks, sectionName, []);
+        
+        try {
+          await this.saveSectionsToBackend();
+          this.showError(`Section "${sectionName}" added successfully!`, 'success');
+        } catch (error) {
+          this.sections = this.sections.filter(s => s !== sectionName);
+          delete this.tasks[sectionName];
+          this.showError("Failed to add section. Please try again.");
+        }
       }
-    }
+    },
+    async saveSectionsToBackend() {
+      try {
+        await axios.post(`${process.env.VUE_APP_API_URL}/api/sections`, {
+          sections: this.sections
+        });
+      } catch (error) {
+        console.error("Error saving sections:", error);
+        throw error; // Propagate error to handle it in the calling function
+      }
+    },
+    addAssignee() {
+      if (this.newAssignee.trim()) {
+        if (!this.taskForm.assignees.includes(this.newAssignee.trim())) {
+          this.taskForm.assignees.push(this.newAssignee.trim());
+        }
+        this.newAssignee = '';
+      }
+    },
+    removeAssignee(index) {
+      this.taskForm.assignees.splice(index, 1);
+    },
+    showDeleteConfirmation(task) {
+      this.confirmAction = 'delete';
+      this.confirmMessage = `Are you sure you want to delete "${task.name}"?`;
+      this.taskToConfirm = task;
+      this.showConfirmModal = true;
+    },
+    showEditConfirmation(task) {
+      this.confirmAction = 'edit';
+      this.confirmMessage = `Do you want to edit "${task.name}"?`;
+      this.taskToConfirm = task;
+      this.showConfirmModal = true;
+    },
+    cancelConfirmation() {
+      this.showConfirmModal = false;
+      this.taskToConfirm = null;
+      this.confirmAction = '';
+      this.confirmMessage = '';
+    },
+    async confirmDelete() {
+      if (this.taskToConfirm) {
+        await this.deleteTask(this.taskToConfirm._id);
+        this.cancelConfirmation();
+      }
+    },
+    confirmEdit() {
+      if (this.taskToConfirm) {
+        this.openEditTaskModal(this.taskToConfirm);
+        this.cancelConfirmation();
+      }
+    },
   }
 };
 </script>
@@ -347,5 +568,158 @@ export default {
 
 .modal-buttons button:hover {
   opacity: 0.9;
+}
+
+.assignees-input {
+  margin-bottom: 1rem;
+}
+
+.assignee-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.assignee-tag {
+  background: #e1e1e1;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.remove-assignee {
+  background: none;
+  border: none;
+  padding: 0 0.25rem;
+  cursor: pointer;
+  color: #666;
+}
+
+.remove-assignee:hover {
+  color: #ff4444;
+}
+
+.confirmation-modal .modal-content {
+  max-width: 400px;
+}
+
+.delete-btn {
+  background-color: #ff4444;
+  color: white;
+}
+
+.delete-btn:hover {
+  background-color: #ff0000;
+}
+
+.board-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 0 20px;
+}
+
+.search-container {
+  position: relative;
+  flex: 1;
+  max-width: 400px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 8px 32px 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #4a9eff;
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2);
+}
+
+.search-icon {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #666;
+}
+
+.filter-container {
+  margin-left: 16px;
+}
+
+.status-filter {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+}
+
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #4a9eff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.error-toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #ff4444;
+  color: white;
+  padding: 12px 24px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 1000;
+  cursor: pointer;
+  animation: slideIn 0.3s ease;
+}
+
+.close-error {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 20px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
 }
 </style>
