@@ -1,5 +1,5 @@
 <template>
-  <div class="task-card">
+  <div class="task-card" :style="{ borderLeft: `4px solid ${getStatusColor(task.status)}` }">
     <div class="task-header">
       <h3>{{ task.name }}</h3>
       <div class="task-menu">
@@ -14,18 +14,15 @@
     </div>
     <p class="task-description">{{ task.description }}</p>
     <div class="task-footer">
-      <div class="task-due-date">
-        <i class="far fa-calendar"></i>
-        {{ formatDate(task.dueDate) }}
-      </div>
-      <div class="task-assignees">
-        <div v-for="(assignee, index) in task.assignees" 
-             :key="index" 
-             class="avatar"
-             :title="assignee"
-             :style="{ backgroundColor: getAvatarColor(assignee) }">
-          {{ getInitials(assignee) }}
+      <div class="assignees">
+        <div v-for="assignee in task.assignees" :key="assignee" 
+             class="assignee" :style="{ backgroundColor: getAssigneeColor(assignee) }">
+          {{ assignee.charAt(0).toUpperCase() }}
         </div>
+      </div>
+      <div class="due-date" v-if="task.dueDate">
+        <i class="far fa-calendar"></i>
+        {{ new Date(task.dueDate).toLocaleDateString() }}
       </div>
     </div>
   </div>
@@ -47,22 +44,20 @@ export default {
     };
   },
   methods: {
-    formatDate(date) {
-      if (!date) return '';
-      return new Date(date).toLocaleDateString();
+    getStatusColor(status) {
+      const colors = {
+        'Todo': '#ff4757',
+        'In Progress': '#2ed573',
+        'Completed': '#1e90ff'
+      };
+      return colors[status] || '#dfe4ea';
     },
-    getInitials(name) {
-      if (!name) return '';
-      return name.split(' ').map(n => n[0]).join('').toUpperCase();
-    },
-    getAvatarColor(name) {
-      const colors = [
-        '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
-        '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
-      ];
-      const hash = name.split('').reduce((acc, char) => {
-        return char.charCodeAt(0) + ((acc << 5) - acc);
-      }, 0);
+    getAssigneeColor(assignee) {
+      const colors = ['#4834d4', '#6ab04c', '#eb4d4b', '#22a6b3', '#f0932b'];
+      let hash = 0;
+      for (let i = 0; i < assignee.length; i++) {
+        hash = assignee.charCodeAt(i) + ((hash << 5) - hash);
+      }
       return colors[Math.abs(hash) % colors.length];
     },
     onDelete() {
@@ -80,18 +75,17 @@ export default {
 <style scoped>
 .task-card {
   background: white;
-  border-radius: 6px;
-  padding: 12px;
-  margin-bottom: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  cursor: grab;
-  transition: all 0.2s ease;
-  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  transition: all 0.3s ease;
+  cursor: pointer;
 }
 
 .task-card:hover {
+  transform: translateY(-2px);
   box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-  transform: translateY(-1px);
 }
 
 .task-header {
@@ -103,49 +97,14 @@ export default {
 
 .task-header h3 {
   margin: 0;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.task-menu {
-  position: relative;
-}
-
-.menu-btn {
-  background: transparent;
-  border: none;
-  padding: 4px;
-  cursor: pointer;
-  color: #666;
-}
-
-.menu-dropdown {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  background: white;
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  z-index: 1000;
-}
-
-.menu-dropdown button {
-  display: block;
-  width: 100%;
-  padding: 8px 16px;
-  border: none;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.menu-dropdown button:hover {
-  background: #f5f5f5;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
 }
 
 .task-description {
   color: #666;
-  font-size: 13px;
+  font-size: 14px;
   margin: 8px 0;
   line-height: 1.4;
 }
@@ -155,36 +114,74 @@ export default {
   justify-content: space-between;
   align-items: center;
   margin-top: 12px;
-  font-size: 12px;
-  color: #666;
 }
 
-.task-due-date {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.task-assignees {
+.assignees {
   display: flex;
   gap: 4px;
 }
 
-.avatar {
+.assignee {
   width: 24px;
   height: 24px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  font-weight: 500;
   color: white;
-  cursor: default;
-  transition: transform 0.2s;
+  font-size: 12px;
+  font-weight: 500;
 }
 
-.avatar:hover {
-  transform: scale(1.1);
+.due-date {
+  font-size: 12px;
+  color: #666;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.task-menu {
+  position: relative;
+}
+
+.menu-btn {
+  background: none;
+  border: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: #666;
+  border-radius: 4px;
+}
+
+.menu-btn:hover {
+  background: #f5f5f5;
+}
+
+.menu-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: white;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  z-index: 10;
+  min-width: 120px;
+}
+
+.menu-dropdown button {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  text-align: left;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #333;
+  font-size: 14px;
+}
+
+.menu-dropdown button:hover {
+  background: #f5f5f5;
 }
 </style>
