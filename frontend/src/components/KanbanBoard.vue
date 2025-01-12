@@ -161,7 +161,7 @@ export default {
   data() {
     return {
       sections: [],
-      tasks: {},
+      tasks: [],
       showTaskModal: false,
       showConfirmModal: false,
       editingTask: null,
@@ -175,7 +175,7 @@ export default {
       newAssignee: '',
       searchQuery: '',
       statusFilter: '',
-      loading: false,
+      loading: true,
       errorMessage: '',
       searchTimeout: null,
       taskForm: {
@@ -207,7 +207,9 @@ export default {
       await this.fetchTasks();
     } catch (error) {
       console.error("Error initializing board:", error);
-      this.showError("Failed to load the board. Please refresh the page.");
+      this.errorMessage = "Failed to load board data";
+    } finally {
+      this.loading = false;
     }
   },
   methods: {
@@ -223,14 +225,26 @@ export default {
       try {
         const { data } = await axios.get(`${process.env.VUE_APP_API_URL}/api/sections`);
         this.sections = data;
-        // Initialize tasks object for each section
-        this.sections.forEach(section => {
-          if (!this.tasks[section.name]) {
-            this.$set(this.tasks, section.name, []);
-          }
-        });
+        if (this.sections.length === 0) {
+          // If no sections exist, create default ones
+          await this.createDefaultSections();
+        }
       } catch (error) {
         console.error("Error fetching sections:", error);
+        throw error;
+      }
+    },
+    async createDefaultSections() {
+      const defaultSections = ["Todo", "In Progress", "Completed"];
+      try {
+        for (const name of defaultSections) {
+          await axios.post(`${process.env.VUE_APP_API_URL}/api/sections`, { name });
+        }
+        // Fetch sections again after creating defaults
+        const { data } = await axios.get(`${process.env.VUE_APP_API_URL}/api/sections`);
+        this.sections = data;
+      } catch (error) {
+        console.error("Error creating default sections:", error);
         throw error;
       }
     },
@@ -261,7 +275,7 @@ export default {
         });
       } catch (error) {
         console.error("Error fetching tasks:", error);
-        this.showError("Failed to fetch tasks. Please try again.");
+        this.errorMessage = "Failed to fetch tasks. Please try again.";
       } finally {
         this.loading = false;
       }
@@ -326,7 +340,7 @@ export default {
         this.closeTaskModal();
       } catch (error) {
         console.error("Error saving task:", error);
-        this.showError(error.response?.data?.message || "Failed to save task. Please try again.");
+        this.errorMessage = error.response?.data?.message || "Failed to save task. Please try again.";
       } finally {
         this.loading = false;
       }
@@ -348,7 +362,7 @@ export default {
           task.status = newStatus;
         } catch (error) {
           console.error("Error updating task status:", error);
-          this.showError("Failed to update task status");
+          this.errorMessage = "Failed to update task status";
           await this.fetchTasks(); // Refresh tasks to revert the change
         }
       }
@@ -360,10 +374,10 @@ export default {
         for (const sectionName in this.tasks) {
           this.tasks[sectionName] = this.tasks[sectionName].filter(task => task._id !== taskId);
         }
-        this.showError("Task deleted successfully", "success");
+        this.errorMessage = "Task deleted successfully";
       } catch (error) {
         console.error("Error deleting task:", error);
-        this.showError("Failed to delete task");
+        this.errorMessage = "Failed to delete task";
       }
     },
     async addSection() {
@@ -374,10 +388,10 @@ export default {
           const { data } = await axios.post(`${process.env.VUE_APP_API_URL}/api/sections`, { name: name.trim() });
           this.sections = data;
           this.$set(this.tasks, name.trim(), []);
-          this.showError(`Section "${name}" added successfully!`, 'success');
+          this.errorMessage = `Section "${name}" added successfully!`;
         } catch (error) {
           console.error("Error adding section:", error);
-          this.showError(error.response?.data?.message || "Failed to add section");
+          this.errorMessage = error.response?.data?.message || "Failed to add section";
         } finally {
           this.loading = false;
         }
@@ -408,10 +422,10 @@ export default {
         }
         
         this.cancelEditSection();
-        this.showError(`Section renamed to "${newName}"`, 'success');
+        this.errorMessage = `Section renamed to "${newName}"`;
       } catch (error) {
         console.error("Error saving section:", error);
-        this.showError(error.response?.data?.message || "Failed to save section");
+        this.errorMessage = error.response?.data?.message || "Failed to save section";
       } finally {
         this.loading = false;
       }
@@ -428,10 +442,10 @@ export default {
           this.sections = data;
           this.$delete(this.tasks, section.name);
           await this.fetchTasks(); // Refresh tasks as they might have moved
-          this.showError(`Section "${section.name}" deleted`, 'success');
+          this.errorMessage = `Section "${section.name}" deleted`;
         } catch (error) {
           console.error("Error deleting section:", error);
-          this.showError(error.response?.data?.message || "Failed to delete section");
+          this.errorMessage = error.response?.data?.message || "Failed to delete section";
         } finally {
           this.loading = false;
         }

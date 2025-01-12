@@ -3,18 +3,22 @@ const Section = require("../models/Section");
 const Task = require("../models/Task");
 const router = express.Router();
 
+const DEFAULT_SECTIONS = ["Todo", "In Progress", "Completed"];
+
 // Get all sections
 router.get("/", async (req, res) => {
     try {
-        const sections = await Section.find().sort({ order: 1 });
+        let sections = await Section.find().sort({ order: 1 });
+        
+        // If no sections exist, create default ones
         if (sections.length === 0) {
-            // Initialize default sections if none exist
-            const defaultSections = ["Todo", "In Progress", "Completed"].map(
-                (name, index) => ({ name, order: index })
-            );
-            const createdSections = await Section.insertMany(defaultSections);
-            return res.json(createdSections);
+            const defaultSections = DEFAULT_SECTIONS.map((name, index) => ({
+                name,
+                order: index
+            }));
+            sections = await Section.insertMany(defaultSections);
         }
+        
         res.json(sections);
     } catch (err) {
         console.error("Error fetching sections:", err);
@@ -30,18 +34,22 @@ router.post("/", async (req, res) => {
             return res.status(400).json({ message: "Section name is required" });
         }
 
-        // Check if there are existing sections
-        const existingSections = await Section.find();
-        const newOrder = existingSections.length > 0 ? existingSections.length : 0;
+        // Check if section with this name already exists
+        const existingSection = await Section.findOne({ name: name.trim() });
+        if (existingSection) {
+            return res.status(400).json({ message: "Section with this name already exists" });
+        }
+
+        // Get the highest order
+        const lastSection = await Section.findOne().sort({ order: -1 });
+        const order = lastSection ? lastSection.order + 1 : 0;
 
         const newSection = new Section({
-            name,
-            order: newOrder
+            name: name.trim(),
+            order
         });
 
         await newSection.save();
-
-        // Return all sections after adding the new one
         const sections = await Section.find().sort({ order: 1 });
         res.status(201).json(sections);
     } catch (err) {
