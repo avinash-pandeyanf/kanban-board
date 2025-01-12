@@ -27,15 +27,15 @@
           <div class="section-title">
             <h2 @click="startEditingSection(section)">{{ section.name }}</h2>
             <div class="section-actions">
-              <button class="edit-section-btn" @click="startEditingSection(section)">
+              <button class="edit-section-btn" @click="startEditingSection(section)" title="Edit section">
                 <i class="fas fa-edit"></i>
               </button>
-              <button class="delete-section-btn" @click="confirmDeleteSection(section)">
+              <button class="delete-section-btn" @click="confirmDeleteSection(section)" title="Delete section">
                 <i class="fas fa-trash"></i>
               </button>
             </div>
           </div>
-          <button class="add-task-btn" @click="openAddTaskModal(section.name)">
+          <button class="add-task-btn" @click="openAddTaskModal(section.name)" title="Add task">
             <i class="fas fa-plus"></i>
           </button>
         </div>
@@ -55,6 +55,7 @@
           </template>
         </draggable>
         <div v-if="!tasks[section.name] || tasks[section.name].length === 0" class="empty-section">
+          <p class="empty-text">No tasks</p>
           <button class="add-task-btn-large" @click="openAddTaskModal(section.name)">
             + Add Task
           </button>
@@ -135,7 +136,7 @@
           <button 
             type="button" 
             :class="{ 'delete-btn': confirmAction === 'delete' }"
-            @click="confirmAction === 'delete' ? confirmDelete() : confirmEdit()"
+            @click="handleConfirm"
           >
             {{ confirmAction === 'delete' ? 'Delete' : 'Edit' }}
           </button>
@@ -146,16 +147,16 @@
 </template>
 
 <script>
-import TaskCard from "./TaskCard.vue";
-import { getTasks, addTask, updateTask, deleteTask } from "../services/taskService";
 import draggable from 'vuedraggable';
+import TaskCard from './TaskCard.vue';
 import axios from 'axios';
+import '../assets/styles/kanban.css';
 
 export default {
   name: 'KanbanBoard',
-  components: { 
-    TaskCard,
-    draggable
+  components: {
+    draggable,
+    TaskCard
   },
   data() {
     return {
@@ -222,7 +223,7 @@ export default {
       try {
         const { data } = await axios.get(`${process.env.VUE_APP_API_URL}/api/sections`);
         this.sections = data;
-        // Initialize tasks object
+        // Initialize tasks object for each section
         this.sections.forEach(section => {
           if (!this.tasks[section.name]) {
             this.$set(this.tasks, section.name, []);
@@ -245,7 +246,7 @@ export default {
           url.searchParams.append('status', this.statusFilter);
         }
 
-        const { data } = await getTasks(url.search);
+        const { data } = await axios.get(url.href);
         
         // Reset all sections
         this.sections.forEach(section => {
@@ -313,13 +314,13 @@ export default {
       try {
         this.loading = true;
         if (this.editingTask) {
-          const { data } = await updateTask(this.editingTask._id, this.taskForm);
+          const { data } = await axios.put(`${process.env.VUE_APP_API_URL}/api/tasks/${this.editingTask._id}`, this.taskForm);
           const status = this.editingTask.status;
           this.tasks[status] = this.tasks[status].map(t => 
             t._id === this.editingTask._id ? data : t
           );
         } else {
-          const { data } = await addTask(this.taskForm);
+          const { data } = await axios.post(`${process.env.VUE_APP_API_URL}/api/tasks`, this.taskForm);
           this.tasks[this.taskForm.status].push(data);
         }
         this.closeTaskModal();
@@ -330,31 +331,39 @@ export default {
         this.loading = false;
       }
     },
-    async updateTaskStatus({ item, to, from }) {
-      const fromSection = from.parentElement.querySelector('h2').textContent;
-      const toSection = to.parentElement.querySelector('h2').textContent;
-      const taskId = item.getAttribute('data-id');
-      const task = this.tasks[fromSection].find(t => t._id === taskId);
-      
-      if (task) {
+    async updateTaskStatus({ moved }) {
+      if (!moved) return;
+
+      const task = moved.element;
+      const newStatus = moved.to.id || this.sections.find(s => 
+        this.tasks[s.name].includes(task)
+      )?.name;
+
+      if (newStatus && task.status !== newStatus) {
         try {
-          const updatedTask = { ...task, status: toSection };
-          await updateTask(taskId, updatedTask);
-          await this.fetchTasks(); // Refresh all tasks to ensure consistency
+          await axios.put(`${process.env.VUE_APP_API_URL}/api/tasks/${task._id}`, {
+            ...task,
+            status: newStatus
+          });
+          task.status = newStatus;
         } catch (error) {
           console.error("Error updating task status:", error);
-          await this.fetchTasks(); // Refresh on error to revert changes
+          this.showError("Failed to update task status");
+          await this.fetchTasks(); // Refresh tasks to revert the change
         }
       }
     },
-    async deleteTask(id) {
+    async deleteTask(taskId) {
       try {
-        await deleteTask(id);
-        Object.keys(this.tasks).forEach(status => {
-          this.tasks[status] = this.tasks[status].filter(task => task._id !== id);
-        });
+        await axios.delete(`${process.env.VUE_APP_API_URL}/api/tasks/${taskId}`);
+        // Remove task from the UI
+        for (const sectionName in this.tasks) {
+          this.tasks[sectionName] = this.tasks[sectionName].filter(task => task._id !== taskId);
+        }
+        this.showError("Task deleted successfully", "success");
       } catch (error) {
         console.error("Error deleting task:", error);
+        this.showError("Failed to delete task");
       }
     },
     async addSection() {
@@ -440,14 +449,14 @@ export default {
       this.taskForm.assignees.splice(index, 1);
     },
     showDeleteConfirmation(task) {
-      this.confirmAction = 'delete';
-      this.confirmMessage = `Are you sure you want to delete "${task.name}"?`;
       this.taskToConfirm = task;
+      this.confirmAction = 'delete';
+      this.confirmMessage = `Are you sure you want to delete task "${task.name}"?`;
       this.showConfirmModal = true;
     },
     showEditConfirmation(task) {
       this.confirmAction = 'edit';
-      this.confirmMessage = `Do you want to edit "${task.name}"?`;
+      this.confirmMessage = `Do you want to edit task "${task.name}"?`;
       this.taskToConfirm = task;
       this.showConfirmModal = true;
     },
@@ -457,360 +466,21 @@ export default {
       this.confirmAction = '';
       this.confirmMessage = '';
     },
-    async confirmDelete() {
-      if (this.taskToConfirm) {
+    async handleConfirm() {
+      if (this.confirmAction === 'delete') {
         await this.deleteTask(this.taskToConfirm._id);
-        this.cancelConfirmation();
-      }
-    },
-    confirmEdit() {
-      if (this.taskToConfirm) {
+      } else if (this.confirmAction === 'edit') {
         this.openEditTaskModal(this.taskToConfirm);
-        this.cancelConfirmation();
       }
+      this.showConfirmModal = false;
+      this.taskToConfirm = null;
+      this.confirmAction = '';
+      this.confirmMessage = '';
     },
   }
 };
 </script>
 
 <style scoped>
-.kanban-container {
-  padding: 20px;
-  height: 100vh;
-  background-color: #f5f6f8;
-}
-
-.kanban-board {
-  display: flex;
-  gap: 20px;
-  overflow-x: auto;
-  padding: 20px;
-  height: calc(100vh - 40px);
-}
-
-.kanban-section {
-  min-width: 300px;
-  background: white;
-  border-radius: 10px;
-  padding: 16px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-  display: flex;
-  flex-direction: column;
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px;
-  background: #f8f9fa;
-  border-bottom: 1px solid #eee;
-  border-radius: 6px 6px 0 0;
-}
-
-.section-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.section-title h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.section-actions {
-  display: flex;
-  gap: 4px;
-}
-
-.edit-section-btn,
-.delete-section-btn {
-  background: none;
-  border: none;
-  padding: 4px;
-  cursor: pointer;
-  color: #666;
-  transition: color 0.2s;
-}
-
-.edit-section-btn:hover {
-  color: #4a9eff;
-}
-
-.delete-section-btn:hover {
-  color: #ff4444;
-}
-
-.empty-section {
-  padding: 16px;
-  text-align: center;
-}
-
-.add-task-btn-large {
-  width: 100%;
-  padding: 8px;
-  background: none;
-  border: 2px dashed #ddd;
-  border-radius: 6px;
-  color: #666;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.add-task-btn-large:hover {
-  border-color: #4a9eff;
-  color: #4a9eff;
-}
-
-.add-section {
-  display: flex;
-  align-items: flex-start;
-  padding: 16px;
-}
-
-.add-section-btn {
-  background: #f5f6f8;
-  border: 2px dashed #ddd;
-  color: #666;
-  padding: 12px 24px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.add-section-btn:hover {
-  background-color: #eef0f2;
-  border-color: #ccc;
-}
-
-.modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: white;
-  padding: 24px;
-  border-radius: 12px;
-  width: 90%;
-  max-width: 500px;
-}
-
-.modal-content h3 {
-  margin: 0 0 20px;
-  color: #333;
-}
-
-.modal-content form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.modal-content input,
-.modal-content textarea {
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.modal-content textarea {
-  min-height: 100px;
-  resize: vertical;
-}
-
-.modal-buttons {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 20px;
-}
-
-.modal-buttons button {
-  padding: 8px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.modal-buttons button[type="button"] {
-  background: #f5f5f5;
-  border: 1px solid #ddd;
-  color: #666;
-}
-
-.modal-buttons button[type="submit"] {
-  background: #007bff;
-  border: 1px solid #0056b3;
-  color: white;
-}
-
-.modal-buttons button:hover {
-  opacity: 0.9;
-}
-
-.assignees-input {
-  margin-bottom: 1rem;
-}
-
-.assignee-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.assignee-tag {
-  background: #e1e1e1;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.remove-assignee {
-  background: none;
-  border: none;
-  padding: 0 0.25rem;
-  cursor: pointer;
-  color: #666;
-}
-
-.remove-assignee:hover {
-  color: #ff4444;
-}
-
-.confirmation-modal .modal-content {
-  max-width: 400px;
-}
-
-.delete-btn {
-  background-color: #ff4444;
-  color: white;
-}
-
-.delete-btn:hover {
-  background-color: #ff0000;
-}
-
-.board-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  padding: 0 20px;
-}
-
-.search-container {
-  position: relative;
-  flex: 1;
-  max-width: 400px;
-}
-
-.search-input {
-  width: 100%;
-  padding: 8px 32px 8px 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 14px;
-  transition: all 0.2s ease;
-}
-
-.search-input:focus {
-  outline: none;
-  border-color: #4a9eff;
-  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2);
-}
-
-.search-icon {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #666;
-}
-
-.filter-container {
-  margin-left: 16px;
-}
-
-.status-filter {
-  padding: 8px 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 14px;
-  background: white;
-  cursor: pointer;
-}
-
-.loading-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(255, 255, 255, 0.8);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid #f3f3f3;
-  border-top: 3px solid #4a9eff;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-.error-toast {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  background: #ff4444;
-  color: white;
-  padding: 12px 24px;
-  border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  z-index: 1000;
-  cursor: pointer;
-  animation: slideIn 0.3s ease;
-}
-
-.close-error {
-  background: none;
-  border: none;
-  color: white;
-  font-size: 20px;
-  padding: 0 4px;
-  cursor: pointer;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-@keyframes slideIn {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
-}
+/* Component-specific styles can go here if needed */
 </style>

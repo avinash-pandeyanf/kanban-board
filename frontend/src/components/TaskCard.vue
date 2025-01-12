@@ -7,8 +7,8 @@
           <i class="fas fa-ellipsis-h"></i>
         </button>
         <div v-if="showMenu" class="menu-dropdown">
-          <button @click="editTask">Edit</button>
-          <button @click="deleteTask">Delete</button>
+          <button @click="onEdit">Edit</button>
+          <button @click="onDelete">Delete</button>
         </div>
       </div>
     </div>
@@ -33,12 +33,14 @@
 
 <script>
 export default {
+  name: 'TaskCard',
   props: {
     task: {
       type: Object,
       required: true
     }
   },
+  emits: ['delete-task', 'edit-task'],
   data() {
     return {
       showMenu: false
@@ -63,11 +65,11 @@ export default {
       }, 0);
       return colors[Math.abs(hash) % colors.length];
     },
-    deleteTask() {
+    onDelete() {
       this.showMenu = false;
-      this.$emit('delete-task', this.task._id);
+      this.$emit('delete-task', this.task);
     },
-    editTask() {
+    onEdit() {
       this.showMenu = false;
       this.$emit('edit-task', this.task);
     }
