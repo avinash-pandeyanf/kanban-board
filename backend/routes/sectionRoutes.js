@@ -3,14 +3,19 @@ const Section = require("../models/Section");
 const Task = require("../models/Task");
 const router = express.Router();
 
-// Get sections
+// Get all sections
 router.get("/", async (req, res) => {
     try {
-        let section = await Section.findOne();
-        if (!section) {
-            section = await Section.create({});
+        const sections = await Section.find().sort({ order: 1 });
+        if (sections.length === 0) {
+            // Initialize default sections if none exist
+            const defaultSections = ["Todo", "In Progress", "Completed"].map(
+                (name, index) => ({ name, order: index })
+            );
+            const createdSections = await Section.insertMany(defaultSections);
+            return res.json(createdSections);
         }
-        res.json(section.sections.sort((a, b) => a.order - b.order));
+        res.json(sections);
     } catch (err) {
         console.error("Error fetching sections:", err);
         res.status(500).json({ message: err.message });
@@ -25,21 +30,20 @@ router.post("/", async (req, res) => {
             return res.status(400).json({ message: "Section name is required" });
         }
 
-        let section = await Section.findOne();
-        if (!section) {
-            section = new Section();
-        }
+        // Check if there are existing sections
+        const existingSections = await Section.find();
+        const newOrder = existingSections.length > 0 ? existingSections.length : 0;
 
-        const newSection = {
+        const newSection = new Section({
             name,
-            isDefault: false,
-            order: section.sections.length
-        };
+            order: newOrder
+        });
 
-        section.sections.push(newSection);
-        await section.save();
-        
-        res.status(201).json(section.sections.sort((a, b) => a.order - b.order));
+        await newSection.save();
+
+        // Return all sections after adding the new one
+        const sections = await Section.find().sort({ order: 1 });
+        res.status(201).json(sections);
     } catch (err) {
         console.error("Error adding section:", err);
         res.status(400).json({ message: err.message });
@@ -54,27 +58,23 @@ router.put("/:id", async (req, res) => {
             return res.status(400).json({ message: "Section name is required" });
         }
 
-        const section = await Section.findOne();
+        const section = await Section.findById(req.params.id);
         if (!section) {
-            return res.status(404).json({ message: "No sections found" });
-        }
-
-        const sectionIndex = section.sections.findIndex(s => s._id.toString() === req.params.id);
-        if (sectionIndex === -1) {
             return res.status(404).json({ message: "Section not found" });
         }
 
-        // Update section name
-        section.sections[sectionIndex].name = name;
+        const oldName = section.name;
+        section.name = name;
         await section.save();
 
         // Update tasks with old section name
         await Task.updateMany(
-            { status: section.sections[sectionIndex].name },
+            { status: oldName },
             { $set: { status: name } }
         );
 
-        res.json(section.sections.sort((a, b) => a.order - b.order));
+        const sections = await Section.find().sort({ order: 1 });
+        res.json(sections);
     } catch (err) {
         console.error("Error updating section:", err);
         res.status(400).json({ message: err.message });
@@ -84,35 +84,28 @@ router.put("/:id", async (req, res) => {
 // Delete section
 router.delete("/:id", async (req, res) => {
     try {
-        const section = await Section.findOne();
+        const section = await Section.findById(req.params.id);
         if (!section) {
-            return res.status(404).json({ message: "No sections found" });
-        }
-
-        const sectionIndex = section.sections.findIndex(s => s._id.toString() === req.params.id);
-        if (sectionIndex === -1) {
             return res.status(404).json({ message: "Section not found" });
         }
 
-        const sectionToDelete = section.sections[sectionIndex];
+        const oldName = section.name;
+        await section.deleteOne();
 
-        // Delete the section
-        section.sections.splice(sectionIndex, 1);
-        
-        // Reorder remaining sections
-        section.sections.forEach((s, index) => {
-            s.order = index;
-        });
+        // Update remaining sections order
+        const remainingSections = await Section.find().sort({ order: 1 });
+        for (let i = 0; i < remainingSections.length; i++) {
+            remainingSections[i].order = i;
+            await remainingSections[i].save();
+        }
 
-        await section.save();
-
-        // Move tasks to Todo section or delete them
+        // Move tasks to Todo section
         await Task.updateMany(
-            { status: sectionToDelete.name },
+            { status: oldName },
             { $set: { status: "Todo" } }
         );
 
-        res.json(section.sections.sort((a, b) => a.order - b.order));
+        res.json(remainingSections);
     } catch (err) {
         console.error("Error deleting section:", err);
         res.status(400).json({ message: err.message });

@@ -1,34 +1,35 @@
 const mongoose = require("mongoose");
 
 const TaskSchema = new mongoose.Schema({
-  name: { 
-    type: String, 
-    required: true,
-    trim: true
-  },
-  description: { 
-    type: String, 
-    default: "",
-    trim: true 
-  },
-  dueDate: { 
-    type: Date, 
-    default: Date.now 
-  },
-  assignees: [{ 
-    type: String,
-    trim: true
-  }],
-  status: { 
-    type: String, 
-    default: "Todo",
-    enum: ["Todo", "In Progress", "Done"]
-  }
+    name: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    description: {
+        type: String,
+        trim: true,
+        default: ""
+    },
+    status: {
+        type: String,
+        required: true,
+        default: "Todo",
+        enum: ["Todo", "In Progress", "Completed"]
+    },
+    dueDate: {
+        type: Date
+    },
+    assignees: [{
+        type: String,
+        trim: true
+    }],
+    order: {
+        type: Number,
+        default: 0
+    }
 }, {
-  timestamps: true
+    timestamps: true
 });
-
-// Add index for better search performance
-TaskSchema.index({ name: 'text', description: 'text' });
 
 module.exports = mongoose.model("Task", TaskSchema);
