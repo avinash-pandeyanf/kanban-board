@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const DEFAULT_SECTIONS = ["Todo", "In Progress", "Done"];
+const DEFAULT_SECTIONS = ["Todo", "In Progress", "Review"];
 
 const SectionSchema = new mongoose.Schema({
     sections: [{
@@ -17,11 +17,7 @@ const SectionSchema = new mongoose.Schema({
             type: Number,
             default: 0
         }
-    }],
-    defaultSectionNames: {
-        type: [String],
-        default: DEFAULT_SECTIONS
-    }
+    }]
 }, {
     timestamps: true
 });
