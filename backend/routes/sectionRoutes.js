@@ -89,14 +89,16 @@ router.delete("/:id", async (req, res) => {
             return res.status(404).json({ message: "Section not found" });
         }
 
+        // Store the section name before deletion
         const oldName = section.name;
-        await section.deleteOne();
+
+        // Delete the section
+        await Section.deleteOne({ _id: req.params.id });
 
         // Update remaining sections order
         const remainingSections = await Section.find().sort({ order: 1 });
         for (let i = 0; i < remainingSections.length; i++) {
-            remainingSections[i].order = i;
-            await remainingSections[i].save();
+            await Section.findByIdAndUpdate(remainingSections[i]._id, { order: i });
         }
 
         // Move tasks to Todo section
@@ -105,7 +107,8 @@ router.delete("/:id", async (req, res) => {
             { $set: { status: "Todo" } }
         );
 
-        res.json(remainingSections);
+        const updatedSections = await Section.find().sort({ order: 1 });
+        res.json(updatedSections);
     } catch (err) {
         console.error("Error deleting section:", err);
         res.status(400).json({ message: err.message });
